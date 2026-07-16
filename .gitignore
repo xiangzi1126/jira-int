@@ -1,0 +1,13 @@
+# 排除 code/jira 目录(敏感凭证 config/、运行数据 data/、日志 log/)
+code/jira/
+
+# Python 缓存
+__pycache__/
+*.py[cod]
+
+# 工具/本地缓存
+.aamm/
+.serena/
+
+# 旧 git 备份(若有)
+.git_old/
