@@ -121,7 +121,7 @@ def get_jira_subtasks():
             # 构造子任务查询JQL
             jql = f"parent = {parent_key}"
             # 指定要查询的字段（子任务Key + 自定义字段）
-            fields = "key,customfield_10813,customfield_10487,customfield_10500"
+            fields = "key,customfield_10813,customfield_11170,customfield_10487,customfield_10500"
             params = {
                 "jql": jql,
                 "fields": fields,
@@ -148,6 +148,7 @@ def get_jira_subtasks():
                 subtask_key = subtask["key"]
                 # 提取自定义字段（处理空值和数据类型）
                 renewal_duration = subtask["fields"].get("customfield_10813") or ""  # 续费时长（月）
+                renew_method = subtask["fields"].get("customfield_11170") or ""  # 续费方式
                 id_value = subtask["fields"].get("customfield_10487") or ""  # ID
                 expire_time = subtask["fields"].get("customfield_10500") or ""  # 到期时间
 
@@ -159,6 +160,7 @@ def get_jira_subtasks():
                     "Issue Key": subtask_key,
                     "PARENT_KEY": parent_key,
                     "续费时长（月）": renewal_duration,
+                    "续费方式": renew_method,
                     "ID": id_value,
                     "到期时间": expire_time
                 })
@@ -188,7 +190,7 @@ def get_jira_subtasks():
             # 覆盖写入CSV
             with open(output_csv_path, 'w', newline='', encoding='utf-8') as f:
                 # 定义CSV表头
-                headers = ['Issue Key', 'PARENT_KEY', '续费时长（月）', 'ID', '到期时间']
+                headers = ['Issue Key', 'PARENT_KEY', '续费时长（月）', '续费方式', 'ID', '到期时间']
                 writer = csv.DictWriter(f, fieldnames=headers)
                 writer.writeheader()
                 writer.writerows(all_subtasks)

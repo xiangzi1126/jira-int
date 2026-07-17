@@ -12,8 +12,7 @@ from alibabacloud_tea_util import models as util_models
 import logging
 import csv
 import argparse
-# 【修改点】引入 timezone 用于处理阿里云返回的带时区的 UTC 时间
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 
 # ===================== 全局配置与常量定义 =====================
 # 数据目录配置
@@ -22,6 +21,14 @@ DATA_DIR = os.path.normpath(os.path.join(os.path.dirname(__file__), '../../jira/
 LOG_FILE = os.path.normpath(os.path.join(os.path.dirname(__file__), '../../jira/log/create_renewal_issue.log'))
 # 全局输出文件路径（运行时赋值）
 OUTPUT_FILE_PATH = ''
+
+# 续费方式映射：阿里云 RenewStatus 返回值 -> 中文展示
+# （AutoRenewal=自动续费 / ManualRenewal=手动续费 / NotRenewal=不续费）
+RENEW_STATUS_MAP = {
+    'AutoRenewal': '自动续费',
+    'ManualRenewal': '手动续费',
+    'NotRenewal': '不续费',
+}
 
 
 # ===================== 日志初始化配置 =====================
@@ -273,7 +280,6 @@ class AliyunMultiRoleRenewalQuery:
 
         for instance in instances:
             product_type = instance.get('ProductType', '')
-            end_time_str = instance.get('EndTime', '')
 
             # 【过滤规则核心：精确匹配资源所属账号和产品类型】
             if role_session_name in exclude_accounts:
@@ -283,39 +289,23 @@ class AliyunMultiRoleRenewalQuery:
                 filtered_count += 1
                 continue
 
-            # 【新增修改点：过滤规则核心：资源到期时间必须在现在之后】
-            if end_time_str:
-                try:
-                    # 尝试解析带时区的 ISO8601 格式 (阿里云常见格式如 '2024-06-01T16:00:00Z')
-                    dt_str = end_time_str.replace('Z', '+00:00')
-                    end_time_obj = datetime.fromisoformat(dt_str)
-                    # 与当前带时区的 UTC 时间作比较
-                    if end_time_obj <= datetime.now(timezone.utc):
-                        filtered_count += 1
-                        continue
-                except ValueError:
-                    try:
-                        # 尝试解析普通格式 (如 '2024-06-01 00:00:00')
-                        end_time_obj = datetime.strptime(end_time_str, '%Y-%m-%d %H:%M:%S')
-                        # 与当前本地时间作比较
-                        if end_time_obj <= datetime.now():
-                            filtered_count += 1
-                            continue
-                    except Exception as e:
-                        logger.warning(f"无法解析的到期时间格式: {end_time_str}, 将默认保留该条目。错误: {e}")
+            # 续费方式：根据阿里云 RenewStatus 映射为中文（未知值保留原值，便于排查）
+            renew_status_raw = instance.get('RenewStatus', '')
+            renew_method = RENEW_STATUS_MAP.get(renew_status_raw, renew_status_raw or '')
 
             processed_data.append({
                 '资源id': instance.get('InstanceID', ''),
                 '资源所属账号': role_session_name,  # 保留原始名称
-                '资源到期时间': end_time_str,
+                '资源到期时间': instance.get('EndTime', ''),
                 '状态': instance.get('Status', ''),  # 新增：实例状态
                 '产品类型': product_type,  # 新增：产品类型
                 '产品代码': instance.get('ProductCode', ''),  # 新增：产品代码
-                '地域': instance.get('Region', '')  # 新增：实例所属地域
+                '地域': instance.get('Region', ''),  # 新增：实例所属地域
+                '续费方式': renew_method  # 新增：续费方式（自动续费/手动续费/不续费）
             })
 
         if filtered_count > 0:
-            logger.info(f"角色{role_section}：根据过滤规则(包含黑名单和到期时间检查)过滤掉 {filtered_count} 条数据")
+            logger.info(f"角色{role_section}：根据 [getrenew_filter] 规则过滤掉 {filtered_count} 条数据")
 
         logger.info(f"角色{role_section}：处理完成{len(processed_data)}条实例数据")
         return processed_data
@@ -328,7 +318,7 @@ class AliyunMultiRoleRenewalQuery:
         os.makedirs(DATA_DIR, exist_ok=True)
 
         # 定义输出字段（新增状态、产品类型、产品代码、地域）
-        output_fields = ['资源id', '资源所属账号', '资源到期时间', '状态', '产品类型', '产品代码', '地域']
+        output_fields = ['资源id', '资源所属账号', '资源到期时间', '状态', '产品类型', '产品代码', '地域', '续费方式']
 
         # 写入表头
         with open(OUTPUT_FILE_PATH, 'w', encoding='utf-8-sig', newline='') as f:
@@ -344,7 +334,7 @@ class AliyunMultiRoleRenewalQuery:
             logger.warning("无有效数据可写入文件，跳过追加操作")
             return
 
-        output_fields = ['资源id', '资源所属账号', '资源到期时间', '状态', '产品类型', '产品代码', '地域']
+        output_fields = ['资源id', '资源所属账号', '资源到期时间', '状态', '产品类型', '产品代码', '地域', '续费方式']
         with open(OUTPUT_FILE_PATH, 'a', encoding='utf-8-sig', newline='') as f:
             writer = csv.DictWriter(f, fieldnames=output_fields)
             writer.writerows(detail_list)
@@ -374,7 +364,6 @@ class AliyunMultiRoleRenewalQuery:
             # 3. 构造查询请求
             query_request = bss_open_api_20171214_models.QueryAvailableInstancesRequest(
                 subscription_type='Subscription',
-                renew_status='ManualRenewal',
                 page_size=100
             )
 

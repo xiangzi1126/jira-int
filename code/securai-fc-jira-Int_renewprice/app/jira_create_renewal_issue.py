@@ -3,7 +3,7 @@ from requests.auth import HTTPBasicAuth
 import configparser
 import os
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import pandas as pd
 import json
 
@@ -14,6 +14,46 @@ def clean_json_value(value):
     if pd.isna(value) or value is None:
         return ""
     return str(value).strip()
+
+
+def calc_renewal_duration_months(endtime_str):
+    """
+    根据资源到期时间计算续费时长（月）：
+    - 距今天数 < 28 天  -> 1
+    - 距今天数 > 320 天 -> 12
+    - 其余情况          -> None（留空，不设置该字段）
+    到期时间通常为阿里云返回的 ...Z（UTC）格式。
+    """
+    if not endtime_str:
+        return None
+    s = str(endtime_str).strip()
+    if not s:
+        return None
+
+    dt = None
+    # 优先用 fromisoformat 解析（兼容带 Z、带时区、带毫秒的 ISO 格式）
+    try:
+        dt = datetime.fromisoformat(s.replace('Z', '+00:00'))
+    except ValueError:
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d", "%Y/%m/%d %H:%M:%S", "%Y/%m/%d"):
+            try:
+                dt = datetime.strptime(s, fmt)
+                break
+            except ValueError:
+                continue
+    if dt is None:
+        return None
+
+    # 无时区信息时按 UTC 处理（阿里云到期时间通常为 ...Z 的 UTC 格式）
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+
+    days_remaining = (dt - datetime.now(timezone.utc)).total_seconds() / 86400.0
+    if days_remaining < 28:
+        return 1
+    if days_remaining > 320:
+        return 12
+    return None
 
 
 def init_logger():
@@ -256,7 +296,7 @@ class JiraRenewalDataLoader:
         # 3. 数据清洗
         self.logger.info("开始数据清洗（处理空值、去重、格式化）")
         # 确保新增的字段（产品代码、产品类型、地域）即使为空也有默认值
-        for col in ['产品代码', '产品类型', '地域']:
+        for col in ['产品代码', '产品类型', '地域', '续费方式']:
             if col not in final_df.columns:
                 final_df[col] = ""
         final_df['标签'] = final_df['标签'].fillna("").astype(str).str.strip()
@@ -433,6 +473,9 @@ class JiraRenewalMain:
 
                 # 不存在则创建子任务
                 self.logger.debug(f"创建子任务：{sub_summary}")
+                # 续费时长（月）：根据到期时间距今天数判定（<28天=1，>320天=12，其余留空）
+                renewal_duration = calc_renewal_duration_months(clean_json_value(row['资源到期时间']))
+
                 sub_payload = {
                     "fields": {
                         "project": {"key": project_key},
@@ -448,9 +491,14 @@ class JiraRenewalMain:
                         # 核心修改3：customfield_10485改为customfield_10920，值为产品类型
                         "customfield_10920": clean_json_value(row['产品类型']),
                         # 核心修改4：customfield_10488的值改为地域（原资源所在地域）
-                        "customfield_10488": clean_json_value(row['地域'])
+                        "customfield_10488": clean_json_value(row['地域']),
+                        # 新增：续费方式（文本字段，自动续费/手动续费/不续费）
+                        "customfield_11170": clean_json_value(row['续费方式'])
                     }
                 }
+                # 续费时长（月）为数字字段，仅在判定出有效值时设置，否则留空
+                if renewal_duration is not None:
+                    sub_payload["fields"]["customfield_10813"] = renewal_duration
 
                 sub_key = self.jira_operator.create_issue(sub_payload)
                 if sub_key:

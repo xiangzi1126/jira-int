@@ -22,6 +22,14 @@ LOG_FILE = os.path.normpath(os.path.join(os.path.dirname(__file__), '../../jira/
 # 全局输出文件路径（运行时赋值）
 OUTPUT_FILE_PATH = ''
 
+# 续费方式映射：阿里云 RenewStatus 返回值 -> 中文展示
+# （AutoRenewal=自动续费 / ManualRenewal=手动续费 / NotRenewal=不续费）
+RENEW_STATUS_MAP = {
+    'AutoRenewal': '自动续费',
+    'ManualRenewal': '手动续费',
+    'NotRenewal': '不续费',
+}
+
 
 # ===================== 日志初始化配置 =====================
 def init_logger() -> logging.Logger:
@@ -281,6 +289,10 @@ class AliyunMultiRoleRenewalQuery:
                 filtered_count += 1
                 continue
 
+            # 续费方式：根据阿里云 RenewStatus 映射为中文（未知值保留原值，便于排查）
+            renew_status_raw = instance.get('RenewStatus', '')
+            renew_method = RENEW_STATUS_MAP.get(renew_status_raw, renew_status_raw or '')
+
             processed_data.append({
                 '资源id': instance.get('InstanceID', ''),
                 '资源所属账号': role_session_name,  # 保留原始名称
@@ -288,7 +300,8 @@ class AliyunMultiRoleRenewalQuery:
                 '状态': instance.get('Status', ''),  # 新增：实例状态
                 '产品类型': product_type,  # 新增：产品类型
                 '产品代码': instance.get('ProductCode', ''),  # 新增：产品代码
-                '地域': instance.get('Region', '')  # 新增：实例所属地域
+                '地域': instance.get('Region', ''),  # 新增：实例所属地域
+                '续费方式': renew_method  # 新增：续费方式（自动续费/手动续费/不续费）
             })
 
         if filtered_count > 0:
@@ -305,7 +318,7 @@ class AliyunMultiRoleRenewalQuery:
         os.makedirs(DATA_DIR, exist_ok=True)
 
         # 定义输出字段（新增状态、产品类型、产品代码、地域）
-        output_fields = ['资源id', '资源所属账号', '资源到期时间', '状态', '产品类型', '产品代码', '地域']
+        output_fields = ['资源id', '资源所属账号', '资源到期时间', '状态', '产品类型', '产品代码', '地域', '续费方式']
 
         # 写入表头
         with open(OUTPUT_FILE_PATH, 'w', encoding='utf-8-sig', newline='') as f:
@@ -321,7 +334,7 @@ class AliyunMultiRoleRenewalQuery:
             logger.warning("无有效数据可写入文件，跳过追加操作")
             return
 
-        output_fields = ['资源id', '资源所属账号', '资源到期时间', '状态', '产品类型', '产品代码', '地域']
+        output_fields = ['资源id', '资源所属账号', '资源到期时间', '状态', '产品类型', '产品代码', '地域', '续费方式']
         with open(OUTPUT_FILE_PATH, 'a', encoding='utf-8-sig', newline='') as f:
             writer = csv.DictWriter(f, fieldnames=output_fields)
             writer.writerows(detail_list)
@@ -351,7 +364,6 @@ class AliyunMultiRoleRenewalQuery:
             # 3. 构造查询请求
             query_request = bss_open_api_20171214_models.QueryAvailableInstancesRequest(
                 subscription_type='Subscription',
-                renew_status='ManualRenewal',
                 page_size=100
             )
 
