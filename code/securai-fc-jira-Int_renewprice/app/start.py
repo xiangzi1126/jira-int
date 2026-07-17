@@ -52,9 +52,11 @@ def task_logic():
         os.path.join(current_dir, "aliyun_get_ga_pluspre_renewal_price.py"),
         os.path.join(current_dir, "aliyun_get_ga_cbbwp_renewal_price.py"),
         os.path.join(current_dir, "aliyun_get_dide_renewal_price.py"),
+        os.path.join(current_dir, "aliyun_get_ons_renewal_price.py"),
+        os.path.join(current_dir, "aliyun_get_smartag_renewal_price.py"),
         os.path.join(current_dir, "aliyun_get_ri_renewal_price.py"),
         os.path.join(current_dir, "aliyun_patch_missing_price.py"),
-		os.path.join(current_dir, "jira_create_confirm_balance_issue.py")
+	#	os.path.join(current_dir, "jira_create_confirm_balance_issue.py")
     ]
 
     for script in scripts_to_run:
