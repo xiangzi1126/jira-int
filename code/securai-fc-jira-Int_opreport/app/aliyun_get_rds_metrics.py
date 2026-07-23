@@ -1,4 +1,4 @@
-"""获取 RDS 监控数据 (CPU使用率/内存使用率)"""
+"""获取 RDS 监控数据 (CPU使用率/内存使用率/ディスク使用率)"""
 from alibabacloud_sts20150401.client import Client as StsClient
 from alibabacloud_sts20150401.models import AssumeRoleRequest
 from alibabacloud_tea_openapi import models as open_api_models
@@ -34,6 +34,7 @@ NAMESPACE = 'acs_rds_dashboard'
 METRICS = [
     ('CpuUsage', 'cpu'),
     ('MemoryUsage', 'memory'),
+    ('DiskUsage', 'disk'),
 ]
 
 

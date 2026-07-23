@@ -9,6 +9,7 @@ __pycache__/
 .aamm/
 .serena/
 .qoder/
+.workbuddy/
 
 # 旧 git 备份(若有)
 .git_old/

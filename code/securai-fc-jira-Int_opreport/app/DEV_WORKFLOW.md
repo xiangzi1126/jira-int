@@ -99,11 +99,17 @@ def safe_insert_rows(ws, idx, n):
 - [ ] 告警区字体 = MS PGothic 10pt
 
 ## 7. 项目差异速查
-| 项 | TSIINFRA | UNICYCEN |
-|----|----------|----------|
-| sheet 名 | 総評1-8 | 総評 |
-| 资源表 | 第一表(tcp+SVFR/SVVS) + SVFS第二表(多盘) | CPU/Mem表(Proxy001/002) + CEN帯域 |
-| 特殊 | SVFS 多盘 + C16 config + C11 bill | CEN帯域手動、Proxy表示名映射 |
-| 模板 | 运维月报模板_【株式会社TSI様向け】インフラ月次報告書.xlsx | 运维月报模板_【ユニ・チャーム株式会社様】CENサービス運用報告書.xlsx |
+| 项 | TSIINFRA | UNICYCEN | TSIWMS |
+|----|----------|----------|--------|
+| sheet 名 | 総評1-8 | 総評 | 総評1-8 |
+| 资源表 | 第一表(tcp+SVFR/SVVS) + SVFS第二表(多盘) | CPU/Mem表(Proxy001/002) + CEN帯域 | 第一表(10台ECS) + RDS/CEN/SAG子表(留空) |
+| 数据盘列 | O/P (M:N/P:Q 合并) | - | N/O (无合并) |
+| 検知/事象行 | R44/R47 | - | R49/R52 |
+| 課金 | 課金一覧(C7/C11) | - | 无 課金一覧 (no-op) |
+| 以上标记 | Disk 末尾(add_above_marker) | - | 不调用(模板 MQ R40 已有) |
+| リソース图 | 写均一18タイトル, 22×8cm | - | 读模板非均一タイトル, 20.7×7cm |
+| 推移 | clear+rewrite host_list | - | 定位填入(保留非ECS对象行) |
+| 特殊 | SVFS 多盘 + C16 config + C11 bill | CEN帯域手動、Proxy表示名映射 | k8s节点共享InstanceName + InstanceId合并后缀bug |
+| 模板 | 运维月报模板_【株式会社TSI様向け】インフラ月次報告書.xlsx | 运维月报模板_【ユニ・チャーム株式会社様】CENサービス運用報告書.xlsx | 运维月报模板_【株式会社TSI様向け】WMS月次報告書.xlsx |
 
 新增项目：复制 TSIINFRA 脚本 → 改 PROJECT_KEY/模板名/LAYOUT 行号 → 按成品 diff 调资源表逻辑。
