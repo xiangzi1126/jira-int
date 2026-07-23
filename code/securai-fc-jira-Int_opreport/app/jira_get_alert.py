@@ -145,8 +145,8 @@ def get_jira_alert_data():
         # 组装最终的 JQL（状态排除 "静观" 和 "完成（复旧）"）
         jql = f'{project_jql} AND type = 告警邮件 AND status NOT IN ("静观", "完成（复旧）") AND created >= "{start_date}" AND created <= "{end_date}"'
 
-        # 查询字段：只获取指定的4个自定义告警字段
-        fields = "key,project,customfield_10523,customfield_10531,customfield_10532,customfield_10524"
+        # 查询字段：只获取指定的5个自定义告警字段
+        fields = "key,project,customfield_10523,customfield_10531,customfield_10532,customfield_10524,customfield_10534"
 
         logger.info(f"生成查询JQL：{jql}")
         logger.info(f"查询字段：{fields}")
@@ -178,7 +178,7 @@ def get_jira_alert_data():
         with open(data_file, 'w', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
             # 写入定制的表头
-            writer.writerow(['Issue Key', 'Project Key', '告警目标', '告警简述', '告警原因', '告警检测日时'])
+            writer.writerow(['Issue Key', 'Project Key', '告警目标', '告警简述', '告警原因', '告警检测日时', '备注'])
             count = 0
 
             for issue in data.get("issues", []):
@@ -193,14 +193,41 @@ def get_jira_alert_data():
                         return val.get("value", val.get("name", str(val)))
                     return val if val else ""
 
-                # 提取指定的四个自定义字段数据
+                # 辅助函数：从段落(Atlassian文档格式)字段中递归提取纯文本，只取text
+                def get_paragraph_text(cf_key):
+                    val = issue_fields.get(cf_key)
+                    if not val:
+                        return ""
+
+                    def _extract(node):
+                        if isinstance(node, str):
+                            return node
+                        if isinstance(node, dict):
+                            # 文本节点直接返回其 text
+                            if isinstance(node.get("text"), str):
+                                return node["text"]
+                            # 容器节点(doc/paragraph等)递归处理 content
+                            if "content" in node:
+                                parts = [_extract(c) for c in node["content"]]
+                                # 多个段落之间用换行分隔，保持可读性
+                                if node.get("type") == "doc":
+                                    return "\n".join(p for p in parts if p)
+                                return "".join(parts)
+                        if isinstance(node, list):
+                            return "".join(_extract(n) for n in node)
+                        return ""
+
+                    return _extract(val)
+
+                # 提取指定的自定义字段数据
                 target = get_cf_value("customfield_10523")  # 告警目标
                 summary_desc = get_cf_value("customfield_10531")  # 告警简述
                 reason = get_cf_value("customfield_10532")  # 告警原因
                 detect_time = get_cf_value("customfield_10524")  # 告警检测日时
+                remark = get_paragraph_text("customfield_10534")  # 备注
 
                 # 写入行
-                writer.writerow([issue_key, project_key, target, summary_desc, reason, detect_time])
+                writer.writerow([issue_key, project_key, target, summary_desc, reason, detect_time, remark])
                 count += 1
 
         logger.info(f"数据写入完成，共 {count} 条记录（已覆盖原有文件）")

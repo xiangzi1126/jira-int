@@ -175,6 +175,17 @@ def get_jira_issue_data():
         user_name = config.get('jira', 'user_name')
         access_token = config.get('jira', 'access_token')
         project_keys = [key.strip() for key in config.get('jira', 'project_key').split(',') if key.strip()]
+
+        # 读取 opreport 排除项目配置：[opreport_filter] exclude_project 中列出的项目不记录
+        # 注意：project_key 为多个流水线共用的主清单，此处仅在本脚本查询时过滤，不写回配置
+        exclude_projects = []
+        if config.has_option('opreport_filter', 'exclude_project'):
+            exclude_projects = [p.strip() for p in config.get('opreport_filter', 'exclude_project').split(',') if p.strip()]
+        if exclude_projects:
+            before_count = len(project_keys)
+            project_keys = [k for k in project_keys if k not in exclude_projects]
+            logger.info(f"按[opreport_filter]exclude_project过滤掉 {before_count - len(project_keys)} 个项目，不记录：{exclude_projects}")
+
         logger.info(f"使用最新配置 - 域名：{jira_domain}，项目键数量：{len(project_keys)}")
 
         # 生成JQL查询条件 (已修改为新的 JQL 逻辑)

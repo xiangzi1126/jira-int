@@ -8,6 +8,7 @@ __pycache__/
 # 工具/本地缓存
 .aamm/
 .serena/
+.qoder/
 
 # 旧 git 备份(若有)
 .git_old/

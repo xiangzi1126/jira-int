@@ -31,12 +31,14 @@ def task_logic():
 
 
     scripts_to_run = [
-        os.path.join(current_dir, "record_rate.py"),
-        os.path.join(current_dir, "jira_get_request_type.py"),
-        os.path.join(current_dir, "jira_get_resale_business_details.py"),
-        os.path.join(current_dir, "jira_get_account.py"),
-        os.path.join(current_dir, "make_monthly_report.py"),
-        os.path.join(current_dir, "jira_create_report_issue.py")
+        os.path.join(current_dir, "jira_get_op_resale_business_details.py"),
+        os.path.join(current_dir, "jira_get_op_account.py"),
+        os.path.join(current_dir, "aliyun_get_op_ecs.py"),
+        os.path.join(current_dir, "aliyun_get_ecs_metrics.py"),
+        os.path.join(current_dir, "aliyun_get_ecs_cmd.py"),
+        os.path.join(current_dir, "jira_get_alert.py"),
+        os.path.join(current_dir, "make_monthly_opreport.py"),
+        os.path.join(current_dir, "jira_create_opreport_issue.py")
     ]
 
     for script in scripts_to_run:

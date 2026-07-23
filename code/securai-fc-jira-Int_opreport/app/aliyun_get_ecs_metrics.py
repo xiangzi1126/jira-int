@@ -1,3 +1,11 @@
+"""ECS 监控数据拉取 (CPU / 内存 / 磁盘) -- 由 METRICS 表驱动，一次拉取三类指标。
+
+合并自原 aliyun_get_ecs_cpu_metrics.py / aliyun_get_ecs_memory_metrics.py / aliyun_get_ecs_disk_metrics.py。
+输出格式与原脚本完全一致，供 make_monthly_opreport.py 与 aliyun_get_op_cmd.py 复用：
+  监控数据_<账号>/<prefix>_<资源名称>.csv
+  CPU/内存: 账期,资源所属账号,资源id,资源名称,timestamp,average,maximum,minimum
+  磁盘    : 账期,资源所属账号,资源id,资源名称,盘符,timestamp,average,maximum,minimum
+"""
 from alibabacloud_sts20150401.client import Client as StsClient
 from alibabacloud_sts20150401.models import AssumeRoleRequest
 from alibabacloud_tea_openapi import models as open_api_models
@@ -13,6 +21,16 @@ from datetime import datetime, timedelta
 from typing import List, Dict
 
 
+# 指标配置表：(标签, CMS metric_name, 输出文件名前缀, 是否含盘符列)
+METRICS = [
+    {'label': 'cpu',    'metric': 'CPUUtilization',         'prefix': 'cpu',    'has_device': False},
+    {'label': 'memory', 'metric': 'memory_usedutilization', 'prefix': 'memory', 'has_device': False},
+    {'label': 'disk',   'metric': 'diskusage_utilization',  'prefix': 'disk',   'has_device': True},
+]
+
+NAMESPACE = 'acs_ecs_dashboard'
+
+
 def init_logger():
     log_dir = os.path.normpath(os.path.join(os.path.dirname(__file__), '../../jira/log'))
     os.makedirs(log_dir, exist_ok=True)
@@ -20,7 +38,7 @@ def init_logger():
         level=logging.INFO,
         format='%(asctime)s - %(levelname)s - %(message)s',
         handlers=[
-            logging.FileHandler(os.path.join(log_dir, 'ecs_cpu_metrics.log'), encoding='utf-8'),
+            logging.FileHandler(os.path.join(log_dir, 'ecs_metrics.log'), encoding='utf-8'),
             logging.StreamHandler()
         ]
     )
@@ -91,7 +109,7 @@ def get_sts_credentials(config, role_section: str):
 
 
 def get_ecs_instance_info_from_op_csv(role_session_name: str) -> Dict[str, str]:
-    """【已修改】从 aliyun_ecs_op.csv 中提取该角色的ECS实例ID和资源名称的映射字典"""
+    """从 aliyun_ecs_op.csv 中提取该角色的ECS实例ID和资源名称的映射字典"""
     op_file = os.path.join(DATA_DIR, 'aliyun_ecs_op.csv')
     if not os.path.exists(op_file):
         logger.warning(f"  [跳过] ECS盘点文件不存在: {op_file}，请先执行 aliyun_get_op_ecs.py")
@@ -100,9 +118,7 @@ def get_ecs_instance_info_from_op_csv(role_session_name: str) -> Dict[str, str]:
     instance_info = {}
     with open(op_file, encoding='utf-8-sig') as f:
         for row in csv.DictReader(f):
-            # 不再需要判断 ProductCode，因为这个文件里全是 ECS
             if row.get('资源所属账号') == role_session_name:
-                # 这里的列名对应 aliyun_get_op_ecs.py 生成的表头
                 rid = row.get('InstanceId', '').strip()
                 rname = row.get('InstanceName', '').strip()
 
@@ -131,15 +147,16 @@ def create_cms_client(creds) -> CmsClient:
     return CmsClient(cfg)
 
 
-def query_cpu_metrics(cms_client: CmsClient, instance_id: str, start_time: str, end_time: str) -> List[Dict]:
-    """查询单个实例的CPU利用率，自动翻页"""
+def query_metric_list(cms_client: CmsClient, metric_name: str, instance_id: str,
+                      start_time: str, end_time: str) -> List[Dict]:
+    """查询单个实例的指定指标，自动翻页"""
     all_datapoints = []
     cursor = None
 
     for _ in range(200):
         req = cms_models.DescribeMetricListRequest(
-            namespace='acs_ecs_dashboard',
-            metric_name='CPUUtilization',
+            namespace=NAMESPACE,
+            metric_name=metric_name,
             period='7200',
             start_time=start_time,
             end_time=end_time,
@@ -152,7 +169,7 @@ def query_cpu_metrics(cms_client: CmsClient, instance_id: str, start_time: str, 
         body = resp.body
 
         if body.code != '200':
-            logger.error(f"实例 {instance_id} 查询失败: {body.message}")
+            logger.error(f"实例 {instance_id} 指标 {metric_name} 查询失败: {body.message}")
             break
 
         datapoints = json.loads(body.datapoints or '[]')
@@ -166,17 +183,22 @@ def query_cpu_metrics(cms_client: CmsClient, instance_id: str, start_time: str, 
 
 
 def write_instance_csv(account_dir: str, instance_id: str, instance_name: str, billing_cycle: str,
-                       role_session_name: str, datapoints: List[Dict]):
-    """每个实例写一个CSV文件，文件名使用资源名称"""
-    fields = ['账期', '资源所属账号', '资源id', '资源名称', 'timestamp', 'average', 'maximum', 'minimum']
+                       role_session_name: str, prefix: str, has_device: bool,
+                       datapoints: List[Dict]):
+    """每个实例每个指标写一个CSV文件，文件名使用 <prefix>_<资源名称>.csv"""
+    fields = ['账期', '资源所属账号', '资源id', '资源名称']
+    if has_device:
+        fields.append('盘符')
+    fields += ['timestamp', 'average', 'maximum', 'minimum']
+
     safe_name = re.sub(r'[\\/*?:"<>|]', '_', instance_name)
-    out = os.path.join(account_dir, f'cpu_{safe_name}.csv')
+    out = os.path.join(account_dir, f'{prefix}_{safe_name}.csv')
 
     with open(out, 'w', encoding='utf-8-sig', newline='') as f:
         writer = csv.DictWriter(f, fieldnames=fields)
         writer.writeheader()
         for dp in datapoints:
-            writer.writerow({
+            row = {
                 '账期': billing_cycle,
                 '资源所属账号': role_session_name,
                 '资源id': instance_id,
@@ -185,13 +207,17 @@ def write_instance_csv(account_dir: str, instance_id: str, instance_name: str, b
                 'average': dp.get('Average', ''),
                 'maximum': dp.get('Maximum', ''),
                 'minimum': dp.get('Minimum', ''),
-            })
+            }
+            if has_device:
+                # 阿里云 CMS 返回的数据点中，磁盘标识通常存储在 'device' 或 'diskname' 中
+                row['盘符'] = dp.get('device', dp.get('diskname', ''))
+            writer.writerow(row)
     return out
 
 
 def main():
     logger.info("=" * 40)
-    logger.info("🚀 开始执行 ECS CPU 监控数据拉取任务...")
+    logger.info("🚀 开始执行 ECS 监控数据(CPU/内存/磁盘) 拉取任务...")
 
     config = read_config()
     role_sections = [s for s in config.sections() if s.startswith('aliyun-')]
@@ -225,7 +251,6 @@ def main():
             creds, role_session_name = get_sts_credentials(config, role_section)
             logger.info(f"  🔑 STS 授权成功，当前扮演账号: {role_session_name}")
 
-            # 【已修改】调用新的函数从盘点文件获取实例信息，不再传 billing_cycle 去读账单
             instance_info = get_ecs_instance_info_from_op_csv(role_session_name)
             if not instance_info:
                 continue
@@ -235,22 +260,23 @@ def main():
 
             cms_client = create_cms_client(creds)
             for instance_id, instance_name in instance_info.items():
-                logger.info(f"  📊 正在拉取实例: {instance_name} ({instance_id})")
-                datapoints = query_cpu_metrics(cms_client, instance_id, start_time, end_time)
+                for m in METRICS:
+                    logger.info(f"  📊 正在拉取[{m['label']}]实例: {instance_name} ({instance_id})")
+                    datapoints = query_metric_list(cms_client, m['metric'], instance_id, start_time, end_time)
 
-                if not datapoints:
-                    logger.warning(f"    [警告] 实例 {instance_name} 没有查询到任何监控数据，可能已关机或释放。")
-                    continue
+                    if not datapoints:
+                        logger.warning(f"    [警告] 实例 {instance_name} 没有查询到任何{m['label']}监控数据，可能已关机或未安装云监控插件。")
+                        continue
 
-                out = write_instance_csv(account_dir, instance_id, instance_name, billing_cycle, role_session_name,
-                                         datapoints)
-                logger.info(f"    ✅ 成功写入 {len(datapoints)} 条 -> {out}")
-                total += len(datapoints)
+                    out = write_instance_csv(account_dir, instance_id, instance_name, billing_cycle,
+                                             role_session_name, m['prefix'], m['has_device'], datapoints)
+                    logger.info(f"    ✅ [{m['label']}] 成功写入 {len(datapoints)} 条 -> {out}")
+                    total += len(datapoints)
 
         except Exception as e:
             logger.error(f"角色 {role_section} 处理失败: {e}", exc_info=True)
 
-    print(f"\n✅ 批处理完成！总计成功写入 {total} 条指标数据。")
+    print(f"\n✅ 批处理完成！总计成功写入 {total} 条 ECS 指标数据。")
 
 
 if __name__ == '__main__':
