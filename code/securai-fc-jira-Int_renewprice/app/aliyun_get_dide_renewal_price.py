@@ -137,6 +137,10 @@ class AliyunDideRenewalPriceQuery:
         last_month_str = (first_day_of_current - timedelta(days=1)).strftime("%Y-%m")
         input_csv_path = os.path.join(DATA_DIR, f'aliyun_renewal_bill_{last_month_str}.csv')
 
+        first_day_of_next_month = (first_day_of_current + timedelta(days=32)).replace(day=1)
+        next_month_str = first_day_of_next_month.strftime("%Y-%m")
+        logger.info(f"📅 全局筛选条件: 仅处理到期时间在 [{next_month_str}] 期间的 DIDE 资源")
+
         current_month_str = today.strftime("%Y-%m")
         # 结果输出文件命名为 dide
         output_csv_path = os.path.join(DATA_DIR, f'aliyun_renewal_price_{current_month_str}.csv')
@@ -149,15 +153,23 @@ class AliyunDideRenewalPriceQuery:
 
         # 按账号归类 DIDE 资源
         instances_by_account = {}
+        total_count = 0
+        filtered_count = 0
         with open(input_csv_path, 'r', encoding='utf-8-sig') as f:
             for row in csv.DictReader(f):
+                total_count += 1
                 pcode = row.get('产品代码', '').lower().strip()
                 acc = row.get('资源所属账号', '').strip()
 
-                # 专门过滤 DIDE 产品
-                if 'dide' in pcode:
-                    if acc:
+                # 专门过滤 DIDE 产品 + 严格筛选下月到期
+                if 'dide' in pcode and acc:
+                    expire_time_norm = row.get('资源到期时间', '').strip().replace('/', '-')
+                    if expire_time_norm.startswith(next_month_str):
                         instances_by_account.setdefault(acc, []).append(row)
+                        filtered_count += 1
+
+        logger.info(
+            f"📊 基础过滤完成：CSV 共扫描 {total_count} 行，筛选出 {filtered_count} 个符合【DIDE + 下月到期】条件的实例。")
 
         output_fields = ['资源id', '资源所属账号', '资源到期时间', '产品代码', '描述', '原价', '折扣', '货币单位',
                          '最终价']
